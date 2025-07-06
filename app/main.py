@@ -17,6 +17,9 @@ from app.modules.billing.routes import router as billing_router
 from app.modules.notifications.routes import router as notifications_router
 
 import logging
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 
 # Настройка логирования
@@ -39,6 +42,11 @@ async def lifespan(app: FastAPI):
         await init_rabbitmq()
         logger.info("RabbitMQ подключен")
         
+        # Инициализация Rate Limiter
+        limiter = Limiter(key_func=get_remote_address)
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        
         yield
         
     except Exception as e:
@@ -57,13 +65,27 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Настройка CORS
+# Настройка CORS с улучшенной безопасностью
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",  # Vite dev server
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",  # Альтернативный порт
+        "http://127.0.0.1:3000",
+        # В продакшене добавить только нужные домены
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
+    expose_headers=["X-Total-Count"],
+    max_age=86400,  # 24 часа кеширования preflight запросов
 )
 
 

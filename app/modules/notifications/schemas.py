@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator, Field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
+import bleach
 
 
 class NotificationType(str, Enum):
@@ -21,21 +22,26 @@ class NotificationStatus(str, Enum):
 
 class NotificationCreate(BaseModel):
     """Схема создания уведомления"""
-    title: str
-    message: str
+    title: str = Field(..., min_length=1, max_length=255)
+    message: str = Field(..., min_length=1, max_length=2000)
     type: NotificationType = NotificationType.INFO
     user_id: int
+
+    @validator('title', 'message')
+    def sanitize_html(cls, v):
+        # Удаляем HTML теги для безопасности
+        return bleach.clean(v, tags=[], strip=True)
 
 
 class NotificationResponse(BaseModel):
     """Схема ответа уведомления"""
-    notification_id: int
+    id: int
+    user_id: int
     title: str
     message: str
     type: NotificationType
-    status: NotificationStatus
+    is_read: bool
     created_at: datetime
-    read_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True 

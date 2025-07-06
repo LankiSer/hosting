@@ -87,10 +87,11 @@ class AuthService:
             await send_email_notification(
                 to=user_data.email,
                 subject="Добро пожаловать в Shared Hosting!",
-                body=f"Здравствуйте, {user_data.first_name}! Ваш аккаунт успешно создан."
+                body=f"Здравствуйте, {user_data.first_name}! Ваш аккаунт успешно создан.",
+                user_id=auth_user.auth_user_id
             )
         except Exception as e:
-            logger.error(f"Ошибка отправки email: {e}")
+            logger.error(f"Ошибка отправки email для пользователя {auth_user.auth_user_id}: {str(e)}")
 
         return UserResponse(
             user_id=auth_user.auth_user_id,
@@ -115,6 +116,7 @@ class AuthService:
         user = result.scalar_one_or_none()
 
         if not user:
+            logger.warning(f"Попытка входа с несуществующим email: {user_data.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный email или пароль"
@@ -122,6 +124,7 @@ class AuthService:
 
         # 2. Проверить пароль
         if not verify_password(user_data.password, user.hashed_password):
+            logger.warning(f"Неверный пароль для пользователя {user.auth_user_id}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный email или пароль"
@@ -129,6 +132,7 @@ class AuthService:
 
         # 3. Проверить активность аккаунта
         if not user.is_active:
+            logger.warning(f"Попытка входа в деактивированный аккаунт: {user.auth_user_id}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Аккаунт деактивирован"
@@ -144,6 +148,8 @@ class AuthService:
         # 5. Обновить время последнего входа
         user.last_login = datetime.utcnow()
         await db.commit()
+        
+        logger.info(f"Успешный вход пользователя {user.auth_user_id}")
 
         return Token(
             access_token=access_token,

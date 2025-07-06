@@ -4,17 +4,21 @@ from aio_pika import IncomingMessage
 from app.core.rabbitmq import get_channel
 from typing import Dict, Any
 import logging
+from app.core.db import async_session_maker
+from app.modules.notifications.models import Notification
+import bleach
 
 
 logger = logging.getLogger(__name__)
 
 
 async def process_email_notification(message_data: Dict[str, Any]):
-    """Обработка email уведомления"""
+    """Обработка email уведомления и сохранение в БД"""
     try:
         to = message_data.get("to")
         subject = message_data.get("subject")
         body = message_data.get("body")
+        user_id = message_data.get("user_id")
         
         # Здесь должна быть реальная отправка email
         # Например, через SMTP или внешний сервис
@@ -25,16 +29,29 @@ async def process_email_notification(message_data: Dict[str, Any]):
         
         logger.info(f"Email успешно отправлен на {to}")
         
+        # Сохраняем уведомление в БД
+        async with async_session_maker() as session:
+            notification = Notification(
+                user_id=user_id,
+                type="email",
+                title=bleach.clean(subject, tags=[], strip=True),
+                message=bleach.clean(body, tags=[], strip=True),
+                is_read=False
+            )
+            session.add(notification)
+            await session.commit()
+        
     except Exception as e:
         logger.error(f"Ошибка при отправке email: {e}")
         raise
 
 
 async def process_sms_notification(message_data: Dict[str, Any]):
-    """Обработка SMS уведомления"""
+    """Обработка SMS уведомления и сохранение в БД"""
     try:
         to = message_data.get("to")
         text = message_data.get("text")
+        user_id = message_data.get("user_id")
         
         # Здесь должна быть реальная отправка SMS
         # Например, через SMS-провайдера
@@ -44,6 +61,18 @@ async def process_sms_notification(message_data: Dict[str, Any]):
         await asyncio.sleep(0.1)
         
         logger.info(f"SMS успешно отправлено на {to}")
+        
+        # Сохраняем уведомление в БД
+        async with async_session_maker() as session:
+            notification = Notification(
+                user_id=user_id,
+                type="sms",
+                title="SMS",
+                message=bleach.clean(text, tags=[], strip=True),
+                is_read=False
+            )
+            session.add(notification)
+            await session.commit()
         
     except Exception as e:
         logger.error(f"Ошибка при отправке SMS: {e}")

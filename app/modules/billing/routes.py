@@ -6,6 +6,7 @@ from app.modules.billing.schemas import (
 )
 from app.modules.auth.routes import get_current_user
 from typing import List, Optional
+from app.modules.notifications.producer import send_email_notification
 
 router = APIRouter()
 
@@ -34,8 +35,19 @@ async def create_payment(
     # TODO: Проверить данные платежа
     # TODO: Создать платеж в БД
     # TODO: Интеграция с платежной системой
-    # TODO: Отправить уведомление об оплате
-    raise HTTPException(status_code=501, detail="Метод не реализован")
+    # Пример успешного платежа:
+    payment = {
+        "amount": payment_data.amount,
+        "status": "success"
+    }
+    # Отправляем уведомление через RabbitMQ
+    await send_email_notification(
+        to=current_user.email,
+        subject="Пополнение баланса",
+        body=f"Ваш баланс пополнен на {payment_data.amount} руб.",
+        user_id=current_user.auth_user_id
+    )
+    return {"amount": payment_data.amount, "status": "success"}
 
 
 @router.get("/billing/balance")
