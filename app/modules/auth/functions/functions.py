@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from app.core.models import Users, Clients
 from app.modules.auth.models import AuthUsers
-from app.modules.security.security import get_password_hash, verify_password, create_access_token, verify_token
+from app.modules.security.security import get_password_hash, verify_password, create_access_token, create_refresh_token, verify_token
 from app.modules.auth.schemas import UserRegister, UserLogin, Token, UserResponse
 from app.modules.notifications.producer import send_email_notification
 from datetime import timedelta, datetime
@@ -138,11 +138,20 @@ class AuthService:
                 detail="Аккаунт деактивирован"
             )
 
-        # 4. Создать токен
+        # 4. Создать токены
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        refresh_token_expires = timedelta(days=30)
+        
+        token_data = {"sub": str(user.auth_user_id), "email": user.email, "username": user.username}
+        
         access_token = create_access_token(
-            data={"sub": str(user.auth_user_id), "email": user.email, "username": user.username},
+            data=token_data,
             expires_delta=access_token_expires
+        )
+        
+        refresh_token = create_refresh_token(
+            data=token_data,
+            expires_delta=refresh_token_expires
         )
 
         # 5. Обновить время последнего входа
@@ -153,6 +162,7 @@ class AuthService:
 
         return Token(
             access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
@@ -180,21 +190,28 @@ class AuthService:
     ) -> AuthUsers:
         """Получить текущего пользователя из JWT токена"""
         
+        logger.info(f"Получен токен для проверки: {credentials.credentials[:20]}...")
+        
         # Проверить и декодировать токен
-        token_data = verify_token(credentials.credentials)
+        token_data = verify_token(credentials.credentials, "access")
         
         if token_data is None:
+            logger.error("Токен недействителен")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Недействительный токен",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+        logger.info(f"Токен успешно декодирован, user_id: {token_data.get('user_id')}")
+        
         # Получить пользователя из базы данных
         try:
             user = await AuthService.get_user_by_id(db, int(token_data["user_id"]))
+            logger.info(f"Пользователь найден: {user.email}")
             return user
-        except Exception:
+        except Exception as e:
+            logger.error(f"Ошибка при получении пользователя: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Пользователь не найден",
@@ -217,16 +234,47 @@ class AuthService:
         )
 
     @staticmethod
-    async def refresh_user_token(user: AuthUsers) -> Token:
-        """Обновить JWT токен пользователя"""
+    async def refresh_user_token(db: AsyncSession, refresh_token: str) -> Token:
+        """Обновить JWT токен используя refresh токен"""
+        # Проверить refresh токен
+        token_data = verify_token(refresh_token, "refresh")
+        
+        if token_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Недействительный refresh токен",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Получить пользователя
+        try:
+            user = await AuthService.get_user_by_id(db, int(token_data["user_id"]))
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Пользователь не найден",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Создать новые токены
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": str(user.auth_user_id), "email": user.email, "username": user.username},
+        refresh_token_expires = timedelta(days=30)
+        
+        token_data_new = {"sub": str(user.auth_user_id), "email": user.email, "username": user.username}
+        
+        new_access_token = create_access_token(
+            data=token_data_new,
             expires_delta=access_token_expires
         )
         
+        new_refresh_token = create_refresh_token(
+            data=token_data_new,
+            expires_delta=refresh_token_expires
+        )
+        
         return Token(
-            access_token=access_token,
+            access_token=new_access_token,
+            refresh_token=new_refresh_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )

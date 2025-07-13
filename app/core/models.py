@@ -5,6 +5,7 @@ from app.core.db import Base
 # Импорт модели авторизации
 from app.modules.auth.models import AuthUsers
 from app.modules.notifications.models import Notification
+from app.modules.support.models import SupportTicket, SupportSession, SupportMessage, KnowledgeBase
 
 
 class ResourceLimits(Base):

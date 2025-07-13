@@ -34,6 +34,8 @@ class AuthUsers(Base):
     # Отношения
     system_user = relationship("Users", foreign_keys=[system_user_id])
     notifications = relationship('Notification', back_populates='user')
+    support_tickets = relationship('SupportTicket', back_populates='user')
+    support_sessions = relationship('SupportSession', back_populates='user')
     
     def __repr__(self):
         return f"<AuthUser(email='{self.email}', username='{self.username}')>" 

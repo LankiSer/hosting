@@ -18,12 +18,16 @@ class Settings(BaseSettings):
     
     # JWT settings
     secret_key: str = "your-secret-key-here"
+    refresh_secret_key: str = "your-refresh-secret-key-here-different"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
     # API settings
     api_title: str = "Shared Hosting API"
     api_version: str = "1.0.0"
+    
+    # GigaChat settings
+    gigachat_api_key: str = "MTM5ZGVlYzYtMzYwNC00NDVmLWExNjktMDk4NTg0NTRhZDhhOjQxZGJiOGY3LThlY2YtNDgwMS1iNTk5LTZkM2E5NDQyNWE0MQ=="
     
     @property
     def database_url(self) -> str:

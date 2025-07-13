@@ -66,6 +66,11 @@ class Token(BaseModel):
     expires_in: int
 
 
+class RefreshTokenRequest(BaseModel):
+    """Схема запроса на обновление токена"""
+    refresh_token: str
+
+
 class TokenData(BaseModel):
     """Схема данных токена"""
     user_id: Optional[int] = None

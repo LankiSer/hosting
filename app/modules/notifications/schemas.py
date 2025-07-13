@@ -33,6 +33,31 @@ class NotificationCreate(BaseModel):
         return bleach.clean(v, tags=[], strip=True)
 
 
+class NotificationAdminCreate(BaseModel):
+    """Схема создания уведомления администратором"""
+    title: str = Field(..., min_length=1, max_length=255)
+    message: str = Field(..., min_length=1, max_length=2000)
+    type: NotificationType = NotificationType.INFO
+    user_id: int
+
+    @validator('title', 'message')
+    def sanitize_html(cls, v):
+        # Удаляем HTML теги для безопасности
+        return bleach.clean(v, tags=[], strip=True)
+
+
+class NotificationBroadcast(BaseModel):
+    """Схема создания уведомления для всех пользователей"""
+    title: str = Field(..., min_length=1, max_length=255)
+    message: str = Field(..., min_length=1, max_length=2000)
+    type: NotificationType = NotificationType.INFO
+
+    @validator('title', 'message')
+    def sanitize_html(cls, v):
+        # Удаляем HTML теги для безопасности
+        return bleach.clean(v, tags=[], strip=True)
+
+
 class NotificationResponse(BaseModel):
     """Схема ответа уведомления"""
     id: int

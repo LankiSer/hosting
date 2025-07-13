@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
-from app.modules.auth.schemas import UserRegister, UserLogin, UserResponse, Token
+from app.modules.auth.schemas import UserRegister, UserLogin, UserResponse, Token, RefreshTokenRequest
 from app.modules.auth.functions.functions import AuthService
 from app.modules.auth.models import AuthUsers
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -53,10 +53,11 @@ async def get_current_user_info(
 
 @router.post("/auth/refresh", response_model=Token)
 async def refresh_token(
-    current_user: AuthUsers = Depends(get_current_user)
+    request: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db)
 ):
     """Обновить JWT токен"""
-    return await AuthService.refresh_user_token(current_user)
+    return await AuthService.refresh_user_token(db, request.refresh_token)
 
 
 @router.post("/auth/logout")

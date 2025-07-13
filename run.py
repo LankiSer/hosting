@@ -10,6 +10,18 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
-        log_level="info"
+        reload=False,
+        log_level="info",
+        reload_excludes=[
+            "*.log",
+            "logs/*",
+            "logs/**/*",
+            "__pycache__/*",
+            "**/__pycache__/*",
+            "*.pyc",
+            "**/*.pyc",
+            ".git/*",
+            ".idea/*",
+            ".venv/*"
+        ]
     ) 

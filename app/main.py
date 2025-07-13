@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
@@ -6,6 +6,10 @@ from app.core.db import init_db
 from app.core.rabbitmq import init_rabbitmq, close_rabbitmq
 from app.modules.notifications.producer import send_email_notification
 from app.core import models  # Импорт моделей для создания таблиц
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from app.middleware.security import SecurityMiddleware, InputSanitizationMiddleware
 
 # Импорт роутов
 from app.modules.auth.routes import router as auth_router
@@ -15,15 +19,14 @@ from app.modules.hosting.routes import router as hosting_router
 from app.modules.plans.routes import router as plans_router
 from app.modules.billing.routes import router as billing_router
 from app.modules.notifications.routes import router as notifications_router
+from app.modules.support.routes import router as support_router
 
 import logging
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+from app.core.logging_config import setup_logging
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -42,11 +45,6 @@ async def lifespan(app: FastAPI):
         await init_rabbitmq()
         logger.info("RabbitMQ подключен")
         
-        # Инициализация Rate Limiter
-        limiter = Limiter(key_func=get_remote_address)
-        app.state.limiter = limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-        
         yield
         
     except Exception as e:
@@ -64,6 +62,15 @@ app = FastAPI(
     version=settings.api_version,
     lifespan=lifespan
 )
+
+# Инициализация Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Добавляем middleware безопасности
+app.add_middleware(SecurityMiddleware)
+app.add_middleware(InputSanitizationMiddleware)
 
 # Настройка CORS с улучшенной безопасностью
 app.add_middleware(
@@ -97,6 +104,7 @@ app.include_router(hosting_router, tags=["Хостинг"])
 app.include_router(plans_router, tags=["Тарифы"])
 app.include_router(billing_router, tags=["Биллинг"])
 app.include_router(notifications_router, tags=["Уведомления"])
+app.include_router(support_router, tags=["Поддержка"])
 
 
 @app.get("/")
