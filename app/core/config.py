@@ -9,12 +9,7 @@ class Settings(BaseSettings):
     db_name: str = "hosting"
     db_user: str = "postgres"
     db_password: str = "admin"
-    
-    # RabbitMQ settings
-    rabbitmq_host: str = "localhost"
-    rabbitmq_port: int = 5672
-    rabbitmq_user: str = "guest"
-    rabbitmq_password: str = "guest"
+    database_echo: bool = False
     
     # JWT settings
     secret_key: str = "your-secret-key-here"
@@ -25,17 +20,18 @@ class Settings(BaseSettings):
     # API settings
     api_title: str = "Shared Hosting API"
     api_version: str = "1.2.6"
-    
-    # GigaChat settings
-    gigachat_api_key: str = "MTM5ZGVlYzYtMzYwNC00NDVmLWExNjktMDk4NTg0NTRhZDhhOjQxZGJiOGY3LThlY2YtNDgwMS1iNTk5LTZkM2E5NDQyNWE0MQ=="
+
+    # ISPmanager settings
+    isp_api_base_url: str = "http://localhost:1500"
+    isp_api_token: str | None = None
+    isp_admin_login: str | None = None
+    isp_admin_password: str | None = None
+    isp_default_template: str = "default"
+    ftp_root_path: str = "/var/www/clients"
     
     @property
     def database_url(self) -> str:
         return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
-    
-    @property
-    def rabbitmq_url(self) -> str:
-        return f"amqp://{self.rabbitmq_user}:{self.rabbitmq_password}@{self.rabbitmq_host}:{self.rabbitmq_port}/"
     
     class Config:
         env_file = ".env"

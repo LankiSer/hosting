@@ -1,16 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import get_db
-from app.modules.auth.schemas import UserRegister, UserLogin, UserResponse, Token, RefreshTokenRequest
 from app.modules.auth.functions.functions import AuthService
 from app.modules.auth.models import AuthUsers
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from app.modules.auth.schemas import RefreshTokenRequest, Token, UserLogin, UserRegister, UserResponse
 
 router = APIRouter()
 security = HTTPBearer()
-limiter = Limiter(key_func=get_remote_address)
 
 
 async def get_current_user(
@@ -22,22 +20,18 @@ async def get_current_user(
 
 
 @router.post("/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("5/minute")
 async def register(
-    request: Request,
     user_data: UserRegister,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Регистрация нового пользователя"""
     return await AuthService.register_user(db, user_data)
 
 
 @router.post("/auth/login", response_model=Token)
-@limiter.limit("10/minute")
 async def login(
-    request: Request,
     user_data: UserLogin,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Вход по email и паролю (JWT токен)"""
     return await AuthService.authenticate_user(db, user_data)
@@ -74,7 +68,7 @@ async def verify_email(
     db: AsyncSession = Depends(get_db)
 ):
     """Подтвердить email пользователя"""
-    return await AuthService.verify_email(db, current_user.auth_user_id)
+    return await AuthService.verify_email(db, current_user.id)
 
 
 @router.post("/auth/verify-phone")
@@ -83,4 +77,4 @@ async def verify_phone(
     db: AsyncSession = Depends(get_db)
 ):
     """Подтвердить телефон пользователя"""
-    return await AuthService.verify_phone(db, current_user.auth_user_id) 
+    return await AuthService.verify_phone(db, current_user.id)

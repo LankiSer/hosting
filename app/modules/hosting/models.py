@@ -1,45 +1,40 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Date
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 from app.core.db import Base
 
-
-class Statuses(Base):
-    __tablename__ = 'statuses'
-    
-    status_id = Column(Integer, primary_key=True)
-    status_name = Column(String(50), nullable=False)
-    
-    # Отношения
-    websites = relationship("Websites", back_populates="status")
+if TYPE_CHECKING:  # pragma: no cover
+    from app.modules.auth.models import AuthUsers
+    from app.modules.domains.models import Domain
 
 
-class ServerConfigs(Base):
-    __tablename__ = 'server_configs'
-    
-    config_id = Column(Integer, primary_key=True)
-    nginx_config_url = Column(Text)
-    apache_config_url = Column(Text)
-    ssl_cert_url = Column(Text)
-    ssl_private_key_url = Column(Text)
-    ssl_expiration_date = Column(Date)
-    created_at = Column(DateTime, server_default='now()')
-    last_updated_at = Column(DateTime)
-    
-    # Отношения
-    websites = relationship("Websites", back_populates="config")
+class HostingAccount(Base):
+    __tablename__ = "hosting_accounts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    ftp_username = Column(String(100), nullable=False, unique=True)
+    ftp_password = Column(Text, nullable=False)
+    home_directory = Column(Text, nullable=False)
+    isp_ftp_id = Column(String(128))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("AuthUsers", back_populates="hosting_account")
 
 
-class Websites(Base):
-    __tablename__ = 'websites'
-    
-    site_id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.user_id'))
-    domain_name = Column(String(255), nullable=False)
-    directory_path = Column(String(255), nullable=False)
-    status_id = Column(Integer, ForeignKey('statuses.status_id'))
-    config_id = Column(Integer, ForeignKey('server_configs.config_id'))
-    
-    # Отношения
-    user = relationship("Users", back_populates="websites")
-    status = relationship("Statuses", back_populates="websites")
-    config = relationship("ServerConfigs", back_populates="websites") 
+class HostingSite(Base):
+    __tablename__ = "hosting_sites"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain_id = Column(Integer, ForeignKey("domains.id", ondelete="SET NULL"))
+    root_path = Column(Text, nullable=False)
+    status = Column(String(32), nullable=False, default="active")
+    isp_site_id = Column(String(128))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("AuthUsers", back_populates="sites")
+    domain = relationship("Domain", back_populates="site")

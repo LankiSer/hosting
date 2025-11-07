@@ -25,9 +25,11 @@ class DNSRecordType(str, Enum):
 
 class DomainCreate(BaseModel):
     """Схема создания домена"""
-    domain_name: str
+
+    name: str
     auto_renew: bool = True
     years: int = 1
+    nameservers: Optional[List[str]] = None
 
 
 class DomainUpdate(BaseModel):
@@ -38,13 +40,14 @@ class DomainUpdate(BaseModel):
 
 class DomainResponse(BaseModel):
     """Схема ответа с данными домена"""
-    domain_id: int
-    domain_name: str
+    id: int
+    name: str
     status: DomainStatus
-    registration_date: datetime
-    expiration_date: date
+    registered_at: datetime
+    expires_at: Optional[date] = None
     auto_renew: bool
     nameservers: Optional[List[str]] = None
+    isp_domain_id: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -68,7 +71,8 @@ class DNSRecordUpdate(BaseModel):
 
 class DNSRecordResponse(BaseModel):
     """Схема ответа с данными DNS записи"""
-    record_id: int
+    id: int
+    domain_id: int
     record_type: DNSRecordType
     name: str
     value: str

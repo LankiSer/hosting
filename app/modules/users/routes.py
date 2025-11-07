@@ -1,45 +1,63 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import get_db
-from app.modules.users.schemas import UsersResponse, UsersUpdate
+from app.modules.auth.models import AuthUsers
 from app.modules.auth.routes import get_current_user
-from typing import Optional
+from app.modules.users.schemas import UserProfileResponse, UserProfileUpdate
 
 router = APIRouter()
 
 
-@router.get("/users/me", response_model=UsersResponse)
+@router.get("/users/me", response_model=UserProfileResponse)
 async def get_my_profile(
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: AuthUsers = Depends(get_current_user),
 ):
-    """Информация о текущем пользователе"""
-    # TODO: Получить данные текущего пользователя
-    # TODO: Включить связанные данные (client, limits)
-    raise HTTPException(status_code=501, detail="Метод не реализован")
+    """Возвращает сведения о текущем пользователе."""
+    return UserProfileResponse.model_validate(current_user, from_attributes=True)
 
 
-@router.patch("/users/me", response_model=UsersResponse)
+@router.patch("/users/me", response_model=UserProfileResponse)
 async def update_my_profile(
-    user_update: UsersUpdate,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user_update: UserProfileUpdate,
+    current_user: AuthUsers = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Обновление профиля"""
-    # TODO: Обновить данные пользователя
-    # TODO: Проверить права доступа
-    # TODO: Валидировать изменения
-    raise HTTPException(status_code=501, detail="Метод не реализован")
+    """Обновляет основные данные профиля."""
+
+    updated = False
+
+    for field in ("first_name", "last_name", "phone"):
+        value = getattr(user_update, field)
+        if value is not None:
+            setattr(current_user, field, value)
+            updated = True
+
+    if not updated:
+        return UserProfileResponse.model_validate(current_user, from_attributes=True)
+
+    await db.commit()
+    await db.refresh(current_user)
+
+    return UserProfileResponse.model_validate(current_user, from_attributes=True)
 
 
-@router.get("/users/{user_id}", response_model=UsersResponse)
+@router.get("/users/{user_id}", response_model=UserProfileResponse)
 async def get_user_by_id(
     user_id: int,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: AuthUsers = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Инфо по пользователю (для админов)"""
-    # TODO: Проверить права администратора
-    # TODO: Получить данные пользователя по ID
-    # TODO: Проверить существование пользователя
-    raise HTTPException(status_code=501, detail="Метод не реализован") 
+    """Возвращает данные пользователя. Доступно только владельцу записи."""
+
+    if user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+
+    result = await db.execute(select(AuthUsers).where(AuthUsers.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+
+    return UserProfileResponse.model_validate(user, from_attributes=True)
