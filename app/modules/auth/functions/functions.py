@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -39,6 +40,15 @@ def _generate_ftp_username(base: str) -> str:
         sanitized = f"ftp{sanitized}".ljust(6, "0")
     suffix = secrets.token_hex(2)
     return f"{sanitized[:20]}_{suffix}"
+
+
+def _generate_isp_username(email: str) -> str:
+    local_part = email.split("@", 1)[0].lower()
+    sanitized = re.sub(r"[^a-z0-9_-]+", "-", local_part)
+    sanitized = sanitized.strip("-_")
+    if len(sanitized) < 3:
+        sanitized = (sanitized + "user").ljust(3, "0")
+    return sanitized[:24]
 
 
 class AuthService:
@@ -106,14 +116,30 @@ class AuthService:
             isp_client = get_isp_client()
 
             try:
-                account_payload = await isp_client.create_account(
-                    email=user_data.email,
-                    username=user_data.username,
-                    password=user_data.password,
-                    first_name=user_data.first_name or "",
-                    last_name=user_data.last_name or "",
-                    phone=user_data.phone or "",
-                )
+                isp_username_base = _generate_isp_username(user_data.email)
+                isp_username = isp_username_base
+                attempt = 0
+
+                while True:
+                    try:
+                        account_payload = await isp_client.create_account(
+                            email=user_data.email,
+                            username=isp_username,
+                            password=user_data.password,
+                            first_name=user_data.first_name or "",
+                            last_name=user_data.last_name or "",
+                            phone=user_data.phone or "",
+                        )
+                        break
+                    except ISPManagerError as exc:
+                        message = str(exc).lower()
+                        if "уже существует" in message or "already exists" in message:
+                            attempt += 1
+                            if attempt > 5:
+                                raise
+                            isp_username = f"{isp_username_base[:20]}-{secrets.token_hex(1)}"
+                            continue
+                        raise
 
                 isp_account_id = extract_identifier(account_payload)
 

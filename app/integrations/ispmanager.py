@@ -116,6 +116,23 @@ class ISPManagerClient:
         except ValueError:
             return {"raw": response.text}
 
+    @staticmethod
+    def _ensure_success(payload: Dict[str, Any]) -> Dict[str, Any]:
+        doc = payload.get("doc") if isinstance(payload, dict) else None
+        if doc is None:
+            return payload
+
+        error = doc.get("error")
+        if error:
+            message = (
+                (error.get("msg") or {}).get("$")
+                or (error.get("detail") or {}).get("$")
+                or "Неизвестная ошибка ISPmanager"
+            )
+            raise ISPManagerError(message, payload=payload)
+
+        return doc
+
     async def create_account(
         self,
         *,
@@ -131,26 +148,33 @@ class ISPManagerClient:
             "sok": "ok",
             "name": username,
             "passwd": password,
-            "cnfmpassword": password,
+            "confirm": password,
             "email": email,
         }
 
-        owner = settings.isp_admin_login or "root"
-        params.setdefault("owner", owner)
+        owner_login = settings.isp_admin_login or ""
+        if owner_login and owner_login.lower() != "root":
+            params.setdefault("owner", owner_login)
+        else:
+            params.setdefault("owner", "owner*admins")
 
-        if settings.isp_default_template:
-            params["preset"] = settings.isp_default_template
+        preset = settings.isp_default_template
+        if preset and preset.lower() not in {"", "default"}:
+            params["preset"] = preset
 
-        comment_parts = [part for part in (first_name, last_name) if part]
+        full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+        if full_name:
+            params["fullname"] = full_name
+
+        comment_parts = [part for part in (full_name or None, phone) if part]
         if comment_parts:
-            params["comment"] = " ".join(comment_parts)
+            params["comment"] = " / ".join(comment_parts)
 
-        if phone:
-            params["phone"] = phone
-
-        response = await self._request("GET", params=params)
-        response.setdefault("identifier", username)
-        return response
+        doc = self._ensure_success(await self._request("GET", params=params))
+        return {
+            "identifier": str(doc.get("elid") or doc.get("name") or username),
+            "doc": doc,
+        }
 
     async def create_ftp_user(
         self,
@@ -161,18 +185,20 @@ class ISPManagerClient:
         home_directory: str,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
-            "func": "ftp_user.edit",
+            "func": "ftp.user.edit",
             "sok": "ok",
             "name": username,
             "passwd": password,
-            "cnfmpassword": password,
-            "homedir": home_directory,
+            "confirm": password,
+            "home": home_directory,
             "owner": account_id,
         }
 
-        response = await self._request("GET", params=params)
-        response.setdefault("identifier", username)
-        return response
+        doc = self._ensure_success(await self._request("GET", params=params))
+        return {
+            "identifier": str(doc.get("elid") or doc.get("name") or username),
+            "doc": doc,
+        }
 
     async def create_domain(self, *, account_id: str, domain_name: str, nameservers: Optional[list[str]] = None) -> Dict[str, Any]:
         raise ISPManagerError("Создание домена через классический API ISPmanager пока не реализовано")

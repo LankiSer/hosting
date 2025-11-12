@@ -97,12 +97,12 @@ export default function RegisterPage() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <label className="form-field">
-            <span>{accountType === 'company' ? 'Название компании' : 'Имя'}</span>
+            <span>{accountType === 'company' ? 'Название компании' : 'Логин'}</span>
             <input
               type="text"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
-              placeholder={accountType === 'company' ? 'ООО «Пример»' : 'Введите ваше имя'}
+              placeholder={accountType === 'company' ? 'ООО «Пример»' : 'Выберите логин'}
               required
             />
           </label>
