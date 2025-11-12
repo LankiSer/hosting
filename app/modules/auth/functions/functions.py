@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.integrations import ISPManagerError, extract_identifier, get_isp_client
@@ -91,51 +92,64 @@ class AuthService:
         ftp_password = _generate_password(18)
         home_directory = f"{settings.ftp_root_path.rstrip('/')}/{auth_user.id}"
 
-        isp_client = get_isp_client()
+        isp_account_id: str | None = None
+        isp_ftp_id: str | None = None
 
-        try:
-            account_payload = await isp_client.create_account(
-                email=user_data.email,
-                username=user_data.username,
-                password=user_data.password,
-                first_name=user_data.first_name or "",
-                last_name=user_data.last_name or "",
-                phone=user_data.phone or "",
-            )
+        if settings.isp_enable_sync:
+            if not settings.isp_admin_login or not settings.isp_admin_password:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Не сконфигурирована учётка администратора ISPmanager",
+                )
 
-            account_id = extract_identifier(account_payload)
-            auth_user.isp_account_id = account_id
+            isp_client = get_isp_client()
 
-            ftp_payload = await isp_client.create_ftp_user(
-                account_id=account_id,
-                username=ftp_username,
-                password=ftp_password,
-                home_directory=home_directory,
-            )
+            try:
+                account_payload = await isp_client.create_account(
+                    email=user_data.email,
+                    username=user_data.username,
+                    password=user_data.password,
+                    first_name=user_data.first_name or "",
+                    last_name=user_data.last_name or "",
+                    phone=user_data.phone or "",
+                )
 
-            hosting_account = HostingAccount(
-                user_id=auth_user.id,
-                ftp_username=ftp_username,
-                ftp_password=ftp_password,
-                home_directory=home_directory,
-                isp_ftp_id=extract_identifier(ftp_payload),
-            )
-            db.add(hosting_account)
+                isp_account_id = extract_identifier(account_payload)
 
-            await db.commit()
-        except ISPManagerError as exc:
-            await db.rollback()
-            logger.error("ISPmanager error during registration: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Не удалось создать аккаунт в панели управления",
-            )
-        except Exception:
-            await db.rollback()
-            logger.exception("Failed to register user")
-            raise
-        else:
-            await db.refresh(auth_user)
+                ftp_payload = await isp_client.create_ftp_user(
+                    account_id=isp_account_id,
+                    username=ftp_username,
+                    password=ftp_password,
+                    home_directory=home_directory,
+                )
+
+                isp_ftp_id = extract_identifier(ftp_payload)
+            except ISPManagerError as exc:
+                await db.rollback()
+                logger.error("ISPmanager error during registration: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Не удалось создать аккаунт в панели управления",
+                )
+            except Exception:
+                await db.rollback()
+                logger.exception("Failed to register user")
+                raise
+
+        hosting_account = HostingAccount(
+            user_id=auth_user.id,
+            ftp_username=ftp_username,
+            ftp_password=ftp_password,
+            home_directory=home_directory,
+            isp_ftp_id=isp_ftp_id,
+        )
+        db.add(hosting_account)
+
+        auth_user.isp_account_id = isp_account_id
+
+        await db.commit()
+        await db.refresh(auth_user)
 
         return UserResponse(
             user_id=auth_user.id,
@@ -215,7 +229,9 @@ class AuthService:
     async def get_user_by_id(db: AsyncSession, user_id: int) -> AuthUsers:
         """Получить пользователя по ID"""
         result = await db.execute(
-            select(AuthUsers).where(AuthUsers.id == user_id)
+            select(AuthUsers)
+            .options(selectinload(AuthUsers.hosting_account))
+            .where(AuthUsers.id == user_id)
         )
         user = result.scalar_one_or_none()
         

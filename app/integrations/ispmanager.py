@@ -23,34 +23,68 @@ class ISPManagerError(Exception):
 
 @dataclass
 class ISPManagerClient:
-    """Минимальный клиент для взаимодействия с ISPmanager API."""
+    """Минимальный клиент для взаимодействия с классическим API ISPmanager."""
 
     base_url: str = settings.isp_api_base_url.rstrip("/")
     token: Optional[str] = settings.isp_api_token
     timeout: float = 10.0
 
-    async def _request(self, method: str, path: str, **kwargs) -> Dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        headers = kwargs.pop("headers", {})
-        headers.setdefault("Accept", "application/json")
-        headers.setdefault("Content-Type", "application/json")
+    def __post_init__(self) -> None:
+        if not self.base_url.lower().endswith("/ispmgr"):
+            self.base_url = f"{self.base_url.rstrip('/')}/ispmgr"
 
-        params = kwargs.setdefault("params", {})
-        params.setdefault("out", "json")
+    def _build_url(self, path: str | None = None) -> str:
+        if not path:
+            return self.base_url
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return f"{self.base_url.rstrip('/')}{path}"
+
+    async def _request(
+        self,
+        method: str = "GET",
+        path: Optional[str] = None,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        url = self._build_url(path)
+        headers: Dict[str, str] = {"Accept": "application/json"}
+
+        request_params = dict(params or {})
+        request_params.setdefault("out", "json")
 
         if self.token:
-            headers.setdefault("Authorization", f"Bearer {self.token}")
+            headers["Authorization"] = f"Bearer {self.token}"
         else:
             if not settings.isp_admin_login or not settings.isp_admin_password:
                 raise ISPManagerError("Не заданы параметры isp_admin_login / isp_admin_password для authinfo")
-            params.setdefault(
+            request_params.setdefault(
                 "authinfo",
                 f"{settings.isp_admin_login}:{settings.isp_admin_password}",
             )
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.request(method, url, headers=headers, **kwargs)
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                follow_redirects=True,
+                verify=settings.isp_verify_ssl,
+            ) as client:
+                response = await client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=request_params,
+                    data=data,
+                )
+                logger.debug(
+                    "ISPmanager request",
+                    extra={
+                        "method": method,
+                        "url": str(response.request.url),
+                        "status": response.status_code,
+                    },
+                )
         except httpx.HTTPError as exc:  # pragma: no cover - network errors
             logger.error("ISPmanager request failed: %s", exc)
             raise ISPManagerError("Недоступен ISPmanager API") from exc
@@ -61,7 +95,7 @@ class ISPManagerClient:
                 extra={"status_code": response.status_code, "body": response.text},
             )
             payload: Dict[str, Any]
-            if response.headers.get("content-type", "").startswith("application/json"):
+            if "application/json" in response.headers.get("content-type", ""):
                 payload = response.json()
             else:
                 payload = {"body": response.text}
@@ -77,66 +111,86 @@ class ISPManagerClient:
         if "application/json" in response.headers.get("content-type", ""):
             return response.json()
 
-        return {"raw": response.text}
+        try:
+            return response.json()
+        except ValueError:
+            return {"raw": response.text}
 
-    async def create_account(self, *, email: str, username: str, password: str, first_name: str = "", last_name: str = "", phone: str = "") -> Dict[str, Any]:
-        payload = {
+    async def create_account(
+        self,
+        *,
+        email: str,
+        username: str,
+        password: str,
+        first_name: str = "",
+        last_name: str = "",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "func": "user.edit",
+            "sok": "ok",
+            "name": username,
+            "passwd": password,
+            "cnfmpassword": password,
             "email": email,
-            "username": username,
-            "password": password,
-            "first_name": first_name,
-            "last_name": last_name,
-            "phone": phone,
         }
-        return await self._request("POST", "/v1/accounts", json=payload)
 
-    async def create_ftp_user(self, *, account_id: str, username: str, password: str, home_directory: str) -> Dict[str, Any]:
-        payload = {
-            "account_id": account_id,
-            "username": username,
-            "password": password,
-            "home_directory": home_directory,
+        owner = settings.isp_admin_login or "root"
+        params.setdefault("owner", owner)
+
+        if settings.isp_default_template:
+            params["preset"] = settings.isp_default_template
+
+        comment_parts = [part for part in (first_name, last_name) if part]
+        if comment_parts:
+            params["comment"] = " ".join(comment_parts)
+
+        if phone:
+            params["phone"] = phone
+
+        response = await self._request("GET", params=params)
+        response.setdefault("identifier", username)
+        return response
+
+    async def create_ftp_user(
+        self,
+        *,
+        account_id: str,
+        username: str,
+        password: str,
+        home_directory: str,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "func": "ftp_user.edit",
+            "sok": "ok",
+            "name": username,
+            "passwd": password,
+            "cnfmpassword": password,
+            "homedir": home_directory,
+            "owner": account_id,
         }
-        return await self._request("POST", "/v1/ftp-users", json=payload)
+
+        response = await self._request("GET", params=params)
+        response.setdefault("identifier", username)
+        return response
 
     async def create_domain(self, *, account_id: str, domain_name: str, nameservers: Optional[list[str]] = None) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "account_id": account_id,
-            "domain": domain_name,
-        }
-        if nameservers:
-            payload["nameservers"] = nameservers
-        return await self._request("POST", "/v1/domains", json=payload)
+        raise ISPManagerError("Создание домена через классический API ISPmanager пока не реализовано")
 
     async def create_dns_record(self, *, domain_id: str, record_type: str, name: str, value: str, ttl: int = 3600, priority: Optional[int] = None) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "domain_id": domain_id,
-            "type": record_type,
-            "name": name,
-            "value": value,
-            "ttl": ttl,
-        }
-        if priority is not None:
-            payload["priority"] = priority
-        return await self._request("POST", "/v1/dns-records", json=payload)
+        raise ISPManagerError("Создание DNS-записи через классический API ISPmanager пока не реализовано")
 
     async def create_site(self, *, account_id: str, root_path: str, domain: Optional[str] = None) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "account_id": account_id,
-            "root_path": root_path,
-        }
-        if domain:
-            payload["domain"] = domain
-        return await self._request("POST", "/v1/sites", json=payload)
+        raise ISPManagerError("Создание сайта через классический API ISPmanager пока не реализовано")
 
     async def delete_domain(self, *, domain_id: str) -> Dict[str, Any]:
-        return await self._request("DELETE", f"/v1/domains/{domain_id}")
+        raise ISPManagerError("Удаление домена через классический API ISPmanager пока не реализовано")
 
     async def delete_dns_record(self, *, record_id: str) -> Dict[str, Any]:
-        return await self._request("DELETE", f"/v1/dns-records/{record_id}")
+        raise ISPManagerError("Удаление DNS-записи через классический API ISPmanager пока не реализовано")
 
     async def delete_site(self, *, site_id: str) -> Dict[str, Any]:
-        return await self._request("DELETE", f"/v1/sites/{site_id}")
+        raise ISPManagerError("Удаление сайта через классический API ISPmanager пока не реализовано")
 
 
 def extract_identifier(payload: Dict[str, Any], *candidate_keys: str) -> str:
